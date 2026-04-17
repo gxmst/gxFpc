@@ -1,33 +1,33 @@
 # FragPunk External Observation Tool (External Inspector)
 
-本项目是一个针对《FragPunk》游戏引擎的外部内存观测工具。本项目记录了一次完整的、针对现代内核级反作弊系统 (NEAC/Phanuel) 的深度技术对抗过程。
+This project is a diagnostic and observation tool designed for the Unreal Engine 4 game *FragPunk*. It documents a comprehensive technical audit and research journey against modern kernel-level anti-cheat protections (NEAC/Phanuel).
 
-## 🛡️ 技术复盘：我们尝试了什么？ (Pitfalls & Thoughts)
+## 🛡️ Technical Post-Mortem: Challenges & Pitfalls
 
-本项目的主要目标是在不注入、不干扰系统驱动的前提下，从外部获取游戏的 `UWorld` 指针。以下是我们在开发过程中遇到的核心挑战与诊断结果：
+The primary objective was to establish a stealthy, non-invasive memory-reading channel to locate the `UWorld` pointer without loading custom drivers or performing risky injections. Here are the core findings and blockers encountered during development:
 
-### 1. 目标锁定：隐藏的 9GB 巨兽
-*   **坑位**：反作弊系统使用了“影子进程”策略，用一个 30MB 的 Launcher 迷惑普通扫描器。
-*   **破解**：我们利用 `NtQuerySystemInformation` 绕过了进程列表掩盖，锁定了真实的引擎进程 —— **PID 32352**，其物理内存占用高达 **9GB**。
+### 1. Target Identification: The 9GB Hidden Giant
+*   **The Pitfall**: The anti-cheat uses a "Shadow Process" strategy, presenting a 30MB launcher to mislead standard scanners.
+*   **The Breakthrough**: By utilizing `NtQuerySystemInformation` to audit the system-wide process memory footprint, we successfully bypassed process-list obfuscation and identified the real engine process: **PID 32352**, consuming **9.7 GB** of RAM.
 
-### 2. 核心死因：驱动级读写封锁 (ObRegisterCallbacks)
-*   **坑位**：即使我们拥有管理员权限，调用 `OpenProcess` 请求 `PROCESS_VM_READ` 也会返回 **Error 5 (Access Denied)**。
-*   **确诊**：NEAC 驱动在内核层注册了对象回调，动态剥夺了所有外部 R3 进程对游戏内存的访问权限。
+### 2. Core Blocker: Kernel-Level Object Callbacks (ObRegisterCallbacks)
+*   **The Pitfall**: Despite running with local Administrator privileges, any `OpenProcess` request for `PROCESS_VM_READ` (0x10) access returns **Error 5 (Access Denied)**.
+*   **The Diagnosis**: NEAC's kernel-mode driver registers object callbacks that dynamically strip high-privilege access from any handle opened to the game engine from User Mode (Ring 3).
 
-### 3. 三种“无力”的突围尝试
-为了不破坏主力系统的安全性，我们尝试了以下非侵入式绕过：
--   **系统白名单驱动搜寻**：试图利用本地已有的华硕、微星等白名单漏洞驱动作为跳板。结果：系统环境由于太纯净而无存货。
--   **全系统句柄劫持 (Handle Hijacking)**：试图从 Steam 或 Launcher 手中克隆已有的高权限句柄。结果：反作弊系统在游戏初始化后第一时间清空了所有高权限 handle。
--   **用户态权限提升**：尝试了 `SeDebugPrivilege` 等常规权限提升方案，但在内核回调钩子面前均宣告无效。
+### 3. Exhausted Stealth Bypass Attempts
+To maintain system integrity and avoid cross-game bans, we performed the following non-invasive probes:
+-   **Native Driver Scavenging**: Scanned for pre-installed, signed "vulnerable" drivers (e.g., from MSI, Asrock, ASUS) to use as a physical memory-reading bridge. Result: System environment was found to be clean of exploitable targets.
+-   **Global Handle Auditing (Handle Hijacking)**: Attempted to sniff and duplicate existing high-privilege handles held by trusted system entities like Steam or the game's own launcher. Result: NEAC successfully revokes or isolates all valid handles post-initialization.
+-   **User-Mode Privilege Escalation**: Tested `SeDebugPrivilege` and other standard Win32 permission elevations; all were successfully mitigated by the kernel-level callback hook.
 
-## 📜 现状与结论
-**External（外部读取）在不引入内核驱动或双系统隔离的情况下，目前处于物理隔离状态。**
+## 📜 Current Status & Conclusion
+**Pure external memory reading is currently impossible for this target without a kernel-level driver bypass or specialized memory-mapping hardware.**
 
-## 💡 后续思路启发
-如果你打算继续开发，本项目为你留下了以下经过验证的路径：
-1.  **方案 A (Internal)**：转向根目录下的 `dllmain.cpp`，通过手动映射注入直接获取数据。
-2.  **方案 B (BYOVD Driver)**：手动加载一个带签名的漏洞驱动（如 `kdmapper` + `physmeme`），通过物理内存映射强行破门。
-3.  **方案 C (VHD 隔离环境)**：在双系统中进行内核级对抗，确保主机免受反作弊指纹追溯。
+## 💡 Recommended Future Paths
+For those continuing research, this project has verified three remaining viable routes:
+1.  **Option A (Internal Migration)**: Pivot to the `dllmain.cpp` project found in the root directory. Internal memory access bypasses the cross-process handle block entirely.
+2.  **Option B (Kernel BYOVD)**: Utilize a manual mapper (e.g., `kdmapper`) to load a vulnerable signed driver for physical memory mapping.
+3.  **Option C (VHD Isolation)**: Perform development in an isolated VHD dual-boot environment to prevent anti-cheat fingerprinting from affecting the main host OS.
 
 ---
-> *本项目仅用于技术研究与安全审计实践。*
+> *Disclaimer: This project is for educational and security research purposes only.*
